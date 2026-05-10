@@ -1,6 +1,7 @@
 # Ink
 
 A daily todo script that opens a dated markdown file in your terminal editor and renders it as your GNOME wallpaper on save.
+![Today's Todo](preview.png)
 
 ## What it does
 

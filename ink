@@ -19,7 +19,11 @@ if [ ! -f "$TODAY_FILE" ]; then
         # Expand 2-digit year to 4-digit for the link label
         PREV_FULL="20${PREV_SHORT:0:2}-${PREV_SHORT:3:2}-${PREV_SHORT:6:2}"
         {
-            cat "$PREV_FILE"
+            if tail -4 "$PREV_FILE" | grep -q '^\*Continued from \['; then
+                head -n -4 "$PREV_FILE"
+            else
+                cat "$PREV_FILE"
+            fi
             printf '\n---\n\n*Continued from [%s](%s)*\n\n' "$PREV_FULL" "$PREV_NAME"
         } > "$TODAY_FILE"
     else

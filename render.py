@@ -33,18 +33,17 @@ def word_wrap(text, font_size, avail_px):
     limit = max_chars(font_size, avail_px)
     if not text.strip():
         return [""]
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        if not cur:
-            cur = w
-        elif len(cur) + 1 + len(w) <= limit:
-            cur += " " + w
-        else:
-            lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+    if len(text) <= limit:
+        return [text]
+    lines = []
+    while len(text) > limit:
+        break_at = text.rfind(" ", 0, limit)
+        if break_at <= 0:
+            break_at = limit
+        lines.append(text[:break_at])
+        text = text[break_at + 1:]
+    if text:
+        lines.append(text)
     return lines or [""]
 
 
@@ -84,7 +83,9 @@ def make_tspan(text, bold=False, color=None):
         attrs.append('font-weight="bold"')
     if color:
         attrs.append(f'fill="{color}"')
-    body = html_mod.escape(text)
+    stripped = text.lstrip()
+    nbsps = " " * (len(text) - len(stripped))
+    body = nbsps + html_mod.escape(stripped)
     if attrs:
         return f'<tspan {" ".join(attrs)}>{body}</tspan>'
     return f'<tspan>{body}</tspan>'

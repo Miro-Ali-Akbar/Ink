@@ -8,7 +8,7 @@ import html as html_mod
 
 WIDTH = 1920
 HEIGHT = 1080
-BG = "#1e1e2e"
+BG = "#202020"
 FG = "#cdd6f4"
 BLUE = "#89b4fa"
 CYAN = "#89dceb"
@@ -93,7 +93,7 @@ def make_tspan(text, bold=False, color=None):
 
 def text_el(x, y, fs, color, bold, content_tspans, extra=""):
     return (
-        f'  <text x="{x}" y="{y}" font-size="{fs}" fill="{color}" '
+        f'  <text x="{x}" y="{round(y)}" font-size="{fs}" fill="{color}" '
         f'font-family="{FONT}, monospace"'
         + (' font-weight="bold"' if bold else "")
         + extra
@@ -115,8 +115,9 @@ def md_to_svg(md_text):
         f'  <rect width="{WIDTH}" height="{HEIGHT}" fill="{BG}"/>',
     ]
 
-    y = PAD_Y + SIZES["h1"]  # start y is baseline of first line
+    y = float(PAD_Y + SIZES["h1"])  # start y is baseline of first line
     avail = WIDTH - 2 * PAD_X
+    last_fs = None  # font size of previously rendered element (None = start of page)
 
     for raw in md_text.splitlines():
         if y > HEIGHT - PAD_Y:
@@ -125,97 +126,112 @@ def md_to_svg(md_text):
         # H1
         if raw.startswith("# "):
             fs = SIZES["h1"]
+            if last_fs is not None and fs > last_fs:
+                y += (fs - last_fs) * LINE_SCALE
             for wl in word_wrap(raw[2:], fs, avail):
                 render_line(out, wl, PAD_X, y, fs, BLUE, bold=True)
-                y += int(fs * LINE_SCALE)
-            y += 6
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # H2
         elif raw.startswith("## "):
             fs = SIZES["h2"]
+            if last_fs is not None and fs > last_fs:
+                y += (fs - last_fs) * LINE_SCALE
             for wl in word_wrap(raw[3:], fs, avail):
                 render_line(out, wl, PAD_X, y, fs, BLUE, bold=True)
-                y += int(fs * LINE_SCALE)
-            y += 4
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # H3
         elif raw.startswith("### "):
             fs = SIZES["h3"]
+            if last_fs is not None and fs > last_fs:
+                y += (fs - last_fs) * LINE_SCALE
             for wl in word_wrap(raw[4:], fs, avail):
                 render_line(out, wl, PAD_X, y, fs, CYAN, bold=True)
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # H4+
         elif raw.startswith("#### "):
             fs = SIZES["body"] + 2
+            if last_fs is not None and fs > last_fs:
+                y += (fs - last_fs) * LINE_SCALE
             for wl in word_wrap(raw[5:], fs, avail):
                 render_line(out, wl, PAD_X, y, fs, CYAN)
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # Horizontal rule
         elif re.match(r"^[-*_]{3,}\s*$", raw):
-            ry = y - SIZES["body"] // 2
+            ry = round(y - SIZES["body"] / 2)
             out.append(f'  <line x1="{PAD_X}" y1="{ry}" x2="{WIDTH - PAD_X}" y2="{ry}" stroke="{DIM}" stroke-width="1"/>')
-            y += int(SIZES["body"] * LINE_SCALE * 0.6)
+            y += SIZES["body"] * LINE_SCALE * 0.6
 
         # Checkbox done: - [x]
         elif re.match(r"^- \[[xX]\] ", raw):
             fs = SIZES["body"]
             text = raw[6:]
             out.append(
-                f'  <text x="{PAD_X + 10}" y="{y}" font-size="{fs}" fill="{GREEN}" font-family="{FONT}, monospace">☑</text>'
+                f'  <text x="{PAD_X + 10}" y="{round(y)}" font-size="{fs}" fill="{GREEN}" font-family="{FONT}, monospace">☑</text>'
             )
             for wl in word_wrap(text, fs, avail - 30):
                 escaped = html_mod.escape(wl)
                 out.append(
-                    f'  <text x="{PAD_X + 30}" y="{y}" font-size="{fs}" fill="{DIM}" '
+                    f'  <text x="{PAD_X + 30}" y="{round(y)}" font-size="{fs}" fill="{DIM}" '
                     f'font-family="{FONT}, monospace" text-decoration="line-through"><tspan>{escaped}</tspan></text>'
                 )
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # Checkbox open: - [ ]
         elif re.match(r"^- \[ \] ", raw):
             fs = SIZES["body"]
             text = raw[6:]
             out.append(
-                f'  <text x="{PAD_X + 10}" y="{y}" font-size="{fs}" fill="{FG}" font-family="{FONT}, monospace">☐</text>'
+                f'  <text x="{PAD_X + 10}" y="{round(y)}" font-size="{fs}" fill="{FG}" font-family="{FONT}, monospace">☐</text>'
             )
             for wl in word_wrap(text, fs, avail - 30):
                 render_line(out, wl, PAD_X + 30, y, fs)
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # List item
         elif raw.startswith("- ") or raw.startswith("* "):
             fs = SIZES["body"]
             text = raw[2:]
             out.append(
-                f'  <text x="{PAD_X + 8}" y="{y}" font-size="{fs}" fill="{BLUE}" font-family="{FONT}, monospace">•</text>'
+                f'  <text x="{PAD_X + 8}" y="{round(y)}" font-size="{fs}" fill="{BLUE}" font-family="{FONT}, monospace">•</text>'
             )
             for wl in word_wrap(text, fs, avail - 28):
                 render_line(out, wl, PAD_X + 28, y, fs)
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
         # Blockquote
         elif raw.startswith("> "):
             fs = SIZES["body"]
             text = raw[2:]
-            bar_top = y - fs
-            bar_h = int(fs * LINE_SCALE)
+            bar_top = round(y - fs)
+            bar_h = round(fs * LINE_SCALE)
             out.append(f'  <rect x="{PAD_X}" y="{bar_top}" width="3" height="{bar_h}" fill="{BLUE}"/>')
             for wl in word_wrap(text, fs, avail - 22):
                 render_line(out, wl, PAD_X + 18, y, fs, DIM)
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
-        # Blank line
+        # Blank line — don't update last_fs so heading sizing ignores blank gaps
         elif not raw.strip():
-            y += int(SIZES["body"] * LINE_SCALE * 0.45)
+            y += SIZES["body"] * LINE_SCALE * 0.45
 
         # Normal paragraph
         else:
             fs = SIZES["body"]
             for wl in word_wrap(raw, fs, avail):
                 render_line(out, wl, PAD_X, y, fs)
-                y += int(fs * LINE_SCALE)
+                y += fs * LINE_SCALE
+            last_fs = fs
 
     out.append("</svg>")
     return "\n".join(out)

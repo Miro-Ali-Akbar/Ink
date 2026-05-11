@@ -1,3 +1,4 @@
 logs/
 *.png
 !preview.png
+background.png

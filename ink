@@ -6,7 +6,7 @@ TODAY=$(date +%y-%m-%d)
 TODAY_FULL=$(date +%Y-%m-%d)
 TODAY_FILE="$LOGS_DIR/$TODAY.md"
 EDITOR="${EDITOR:-nvim}"
-OUTPUT_IMG="/tmp/todo_bg.png"
+OUTPUT_IMG="$SCRIPT_DIR/background.png"
 
 mkdir -p "$LOGS_DIR"
 

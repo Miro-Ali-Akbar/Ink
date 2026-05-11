@@ -33,7 +33,8 @@ fi
 
 "$EDITOR" "$TODAY_FILE"
 
-python3 "$SCRIPT_DIR/render.py" "$TODAY_FILE" "$OUTPUT_IMG" \
+(python3 "$SCRIPT_DIR/render.py" "$TODAY_FILE" "$OUTPUT_IMG" \
     && gsettings set org.gnome.desktop.background picture-uri     "file://$OUTPUT_IMG" \
     && gsettings set org.gnome.desktop.background picture-uri-dark "file://$OUTPUT_IMG" \
-    && gsettings set org.gnome.desktop.background picture-options  "zoom"
+    && gsettings set org.gnome.desktop.background picture-options  "zoom") &
+disown

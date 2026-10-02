@@ -69,7 +69,8 @@ def parse_inline(text):
         elif bold_t is not None:
             spans.append((bold_t, True, None))
         elif italic_t is not None:
-            spans.append((italic_t, False, DIM))
+            # Italic may wrap links etc.; parse inside, dim whatever has no color
+            spans.extend((t, b, c or DIM) for t, b, c in parse_inline(italic_t))
         elif code_t is not None:
             spans.append((code_t, False, GREEN))
         elif plain is not None:
@@ -83,9 +84,11 @@ def make_tspan(text, bold=False, color=None):
         attrs.append('font-weight="bold"')
     if color:
         attrs.append(f'fill="{color}"')
-    stripped = text.lstrip()
-    nbsps = " " * (len(text) - len(stripped))
-    body = nbsps + html_mod.escape(stripped)
+    # Renderer trims plain spaces at tspan edges; keep them as NBSP
+    core = text.strip(" ")
+    lead = len(text) - len(text.lstrip(" "))
+    trail = len(text) - len(text.rstrip(" "))
+    body = " " * lead + html_mod.escape(core) + " " * trail
     if attrs:
         return f'<tspan {" ".join(attrs)}>{body}</tspan>'
     return f'<tspan>{body}</tspan>'
@@ -108,78 +111,86 @@ def render_line(out, raw, x, y, fs, color=None, bold=False):
     out.append(text_el(x, y, fs, color, bold, tspans))
 
 
-def md_to_svg(md_text):
-    out = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<svg width="{WIDTH}" height="{HEIGHT}">',
-        f'  <rect width="{WIDTH}" height="{HEIGHT}" fill="{BG}"/>',
-    ]
+def layout(md_text, columns):
+    """Render md into SVG elements. Returns (elements, overflowed).
 
-    y = float(PAD_Y + SIZES["h1"])  # start y is baseline of first line
-    avail = WIDTH - 2 * PAD_X
-    last_fs = None  # font size of previously rendered element (None = start of page)
+    The leading H1 is a full-width header. Content flows below it; with
+    columns=2, overflow restarts at the top of the right half, under the header.
+    """
+    out = []
+    y = float(PAD_Y + SIZES["h1"])  # baseline of first line
+    lines = md_text.splitlines()
 
-    for raw in md_text.splitlines():
-        if y > HEIGHT - PAD_Y:
-            break
+    if lines and lines[0].startswith("# "):
+        fs = SIZES["h1"]
+        for wl in word_wrap(lines[0][2:], fs, WIDTH - 2 * PAD_X):
+            render_line(out, wl, PAD_X, y, fs, BLUE, bold=True)
+            y += fs * LINE_SCALE
+        lines = lines[1:]
+        last_fs = fs
+    else:
+        last_fs = None  # font size of previously rendered element (None = start of page)
 
-        # H1
-        if raw.startswith("# "):
-            fs = SIZES["h1"]
-            if last_fs is not None and fs > last_fs:
+    top_y = y
+    col = 0
+    col_w = WIDTH - 2 * PAD_X if columns == 1 else WIDTH // 2 - PAD_X
+    x0 = PAD_X
+    avail = col_w
+
+    def fit(n_lines, fs):
+        """Ensure n_lines of size fs fit in the current column, moving to the next if needed."""
+        nonlocal y, col, x0
+        if y + (n_lines - 1) * fs * LINE_SCALE <= HEIGHT - PAD_Y:
+            return True
+        if col + 1 >= columns:
+            return False
+        col += 1
+        x0 = WIDTH // 2
+        y = top_y
+        return True
+
+    def at_col_top():
+        return y == top_y
+
+    for raw in lines:
+        heading = re.match(r"^(#{1,4}) (.*)", raw)
+
+        # Headings
+        if heading:
+            level = len(heading.group(1))
+            fs = {1: SIZES["h1"], 2: SIZES["h2"], 3: SIZES["h3"], 4: SIZES["body"] + 2}[level]
+            color = BLUE if level <= 2 else CYAN
+            wrapped = word_wrap(heading.group(2), fs, avail)
+            if last_fs is not None and fs > last_fs and not at_col_top():
                 y += (fs - last_fs) * LINE_SCALE
-            for wl in word_wrap(raw[2:], fs, avail):
-                render_line(out, wl, PAD_X, y, fs, BLUE, bold=True)
-                y += fs * LINE_SCALE
-            last_fs = fs
-
-        # H2
-        elif raw.startswith("## "):
-            fs = SIZES["h2"]
-            if last_fs is not None and fs > last_fs:
-                y += (fs - last_fs) * LINE_SCALE
-            for wl in word_wrap(raw[3:], fs, avail):
-                render_line(out, wl, PAD_X, y, fs, BLUE, bold=True)
-                y += fs * LINE_SCALE
-            last_fs = fs
-
-        # H3
-        elif raw.startswith("### "):
-            fs = SIZES["h3"]
-            if last_fs is not None and fs > last_fs:
-                y += (fs - last_fs) * LINE_SCALE
-            for wl in word_wrap(raw[4:], fs, avail):
-                render_line(out, wl, PAD_X, y, fs, CYAN, bold=True)
-                y += fs * LINE_SCALE
-            last_fs = fs
-
-        # H4+
-        elif raw.startswith("#### "):
-            fs = SIZES["body"] + 2
-            if last_fs is not None and fs > last_fs:
-                y += (fs - last_fs) * LINE_SCALE
-            for wl in word_wrap(raw[5:], fs, avail):
-                render_line(out, wl, PAD_X, y, fs, CYAN)
+            if not fit(len(wrapped), fs):
+                return out, True
+            for wl in wrapped:
+                render_line(out, wl, x0, y, fs, color, bold=level <= 3)
                 y += fs * LINE_SCALE
             last_fs = fs
 
         # Horizontal rule
         elif re.match(r"^[-*_]{3,}\s*$", raw):
+            if not fit(1, SIZES["body"]):
+                return out, True
             ry = round(y - SIZES["body"] / 2)
-            out.append(f'  <line x1="{PAD_X}" y1="{ry}" x2="{WIDTH - PAD_X}" y2="{ry}" stroke="{DIM}" stroke-width="1"/>')
+            out.append(f'  <line x1="{x0}" y1="{ry}" x2="{x0 + avail}" y2="{ry}" stroke="{DIM}" stroke-width="1"/>')
             y += SIZES["body"] * LINE_SCALE * 0.6
 
         # Checkbox done: - [x]
         elif re.match(r"^- \[[xX]\] ", raw):
             fs = SIZES["body"]
-            text = raw[6:]
+            wrapped = word_wrap(raw[6:], fs, avail - 30)
+            if not fit(len(wrapped), fs):
+                return out, True
             out.append(
-                f'  <text x="{PAD_X + 10}" y="{round(y)}" font-size="{fs}" fill="{GREEN}" font-family="{FONT}, monospace">☑</text>'
+                f'  <text x="{x0 + 10}" y="{round(y)}" font-size="{fs}" fill="{GREEN}" font-family="{FONT}, monospace">☑</text>'
             )
-            for wl in word_wrap(text, fs, avail - 30):
+            for wl in wrapped:
                 escaped = html_mod.escape(wl)
                 out.append(
-                    f'  <text x="{PAD_X + 30}" y="{round(y)}" font-size="{fs}" fill="{DIM}" '
+                    f'  <text x="{x0 + 30}" y="{round(y)}" font-size="{fs}" fill="{DIM}" '
                     f'font-family="{FONT}, monospace" text-decoration="line-through"><tspan>{escaped}</tspan></text>'
                 )
                 y += fs * LINE_SCALE
@@ -188,53 +199,75 @@ def md_to_svg(md_text):
         # Checkbox open: - [ ]
         elif re.match(r"^- \[ \] ", raw):
             fs = SIZES["body"]
-            text = raw[6:]
+            wrapped = word_wrap(raw[6:], fs, avail - 30)
+            if not fit(len(wrapped), fs):
+                return out, True
             out.append(
-                f'  <text x="{PAD_X + 10}" y="{round(y)}" font-size="{fs}" fill="{FG}" font-family="{FONT}, monospace">☐</text>'
+                f'  <text x="{x0 + 10}" y="{round(y)}" font-size="{fs}" fill="{FG}" font-family="{FONT}, monospace">☐</text>'
             )
-            for wl in word_wrap(text, fs, avail - 30):
-                render_line(out, wl, PAD_X + 30, y, fs)
+            for wl in wrapped:
+                render_line(out, wl, x0 + 30, y, fs)
                 y += fs * LINE_SCALE
             last_fs = fs
 
         # List item
         elif raw.startswith("- ") or raw.startswith("* "):
             fs = SIZES["body"]
-            text = raw[2:]
+            wrapped = word_wrap(raw[2:], fs, avail - 28)
+            if not fit(len(wrapped), fs):
+                return out, True
             out.append(
-                f'  <text x="{PAD_X + 8}" y="{round(y)}" font-size="{fs}" fill="{BLUE}" font-family="{FONT}, monospace">•</text>'
+                f'  <text x="{x0 + 8}" y="{round(y)}" font-size="{fs}" fill="{BLUE}" font-family="{FONT}, monospace">•</text>'
             )
-            for wl in word_wrap(text, fs, avail - 28):
-                render_line(out, wl, PAD_X + 28, y, fs)
+            for wl in wrapped:
+                render_line(out, wl, x0 + 28, y, fs)
                 y += fs * LINE_SCALE
             last_fs = fs
 
         # Blockquote
         elif raw.startswith("> "):
             fs = SIZES["body"]
-            text = raw[2:]
+            wrapped = word_wrap(raw[2:], fs, avail - 22)
+            if not fit(len(wrapped), fs):
+                return out, True
             bar_top = round(y - fs)
             bar_h = round(fs * LINE_SCALE)
-            out.append(f'  <rect x="{PAD_X}" y="{bar_top}" width="3" height="{bar_h}" fill="{BLUE}"/>')
-            for wl in word_wrap(text, fs, avail - 22):
-                render_line(out, wl, PAD_X + 18, y, fs, DIM)
+            out.append(f'  <rect x="{x0}" y="{bar_top}" width="3" height="{bar_h}" fill="{BLUE}"/>')
+            for wl in wrapped:
+                render_line(out, wl, x0 + 18, y, fs, DIM)
                 y += fs * LINE_SCALE
             last_fs = fs
 
         # Blank line — don't update last_fs so heading sizing ignores blank gaps
         elif not raw.strip():
-            y += SIZES["body"] * LINE_SCALE * 0.45
+            if not at_col_top():
+                y += SIZES["body"] * LINE_SCALE * 0.45
 
         # Normal paragraph
         else:
             fs = SIZES["body"]
-            for wl in word_wrap(raw, fs, avail):
-                render_line(out, wl, PAD_X, y, fs)
+            wrapped = word_wrap(raw, fs, avail)
+            if not fit(len(wrapped), fs):
+                return out, True
+            for wl in wrapped:
+                render_line(out, wl, x0, y, fs)
                 y += fs * LINE_SCALE
             last_fs = fs
 
-    out.append("</svg>")
-    return "\n".join(out)
+    return out, False
+
+
+def md_to_svg(md_text):
+    body, overflowed = layout(md_text, 1)
+    if overflowed:
+        body, _ = layout(md_text, 2)
+    return "\n".join([
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        f'<svg width="{WIDTH}" height="{HEIGHT}">',
+        f'  <rect width="{WIDTH}" height="{HEIGHT}" fill="{BG}"/>',
+        *body,
+        "</svg>",
+    ])
 
 
 def main():

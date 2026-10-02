@@ -2,3 +2,4 @@ logs/
 *.png
 !preview.png
 background.png
+__pycache__
